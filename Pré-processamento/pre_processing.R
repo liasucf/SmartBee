@@ -1,12 +1,31 @@
-#Descobrir onde esta o programa do R
+
+#Descobrir onde está rodando o programa do R e colocar seus dados nesse mesmo diretorio
 getwd()
 
-# importando arqiuvo com os dados a serem pre-processados
+# importando aquivo (que voce colocou no diretorio acima) 
+#com os dados a serem pre-processados
 data <- read.csv("emil_1estacao.csv", header=TRUE)
 mydata <- subset( data, select = c(date,Month, hive_weight,hive_temperature,hive_humidity, 
                                    ambient_temperature,ambient_humidity ))
 mydata_preditors <- subset( mydata, select = c(hive_weight,hive_temperature,hive_humidity, 
                                                ambient_temperature,ambient_humidity ))
+
+
+
+#Instalação de todos os pacotes
+
+#Pacote para função skweness
+install.packages("moments")
+install.packages('outliers')
+install.packages('Hmisc')
+install.packages('DMwR')
+install.packages('caret')
+install.packages("mice")
+install.packages("corrplot")
+install.packages("ggplot2")
+install.packages("ggfortify")
+install.packages("factoextra")
+install.packages("mlbench")
 
 
 
@@ -34,6 +53,8 @@ sd(mydata$hive_weight , na.rm = TRUE)
 # package para calcular histogram condicionado a classe
 library(lattice)
 attach(mydata)
+
+
 histogram( ~ ambient_temperature | factor(Month) , mydata)
 histogram( ~ ambient_humidity | factor(Month) , mydata)
 histogram( ~ hive_temperature | factor(Month) , mydata)
@@ -53,6 +74,8 @@ aggregate(ambient_humidity ~ Month , data=mydata, sd)
 aggregate(hive_temperature ~ Month , data=mydata, sd)
 aggregate(hive_humidity ~ Month , data=mydata, sd)
 aggregate(hive_weight ~ Month , data=mydata, sd)
+
+library(moments)
 
 aggregate(ambient_temperature ~ Month , data=mydata, skewness)
 aggregate(ambient_humidity ~ Month , data=mydata, skewness)
@@ -74,66 +97,118 @@ dfNorm
 #***************************Detectando e Retirando os outliers***************************
 #Boxplot
 boxplot(mydata_preditors, horizontal=TRUE)
-#Pega os valores reais dos outliers com essa função abaixo e bota em um vetor
+
+#Para um conjunto de dados contínuos os outliers são definido por aqueles fora da faixa de valores do
+#75th and 25th quartile
+
+quantile(mydata_preditors$hive_weight) 
+quantile(mydata_preditors$hive_temperature) 
+quantile(mydata_preditors$hive_humidity) 
+quantile(mydata_preditors$ambient_temperature) 
+quantile(mydata_preditors$ambient_humidity) 
+
+#Outliers de cada coluna seguindo a regra do quartile
+outlier_values <- boxplot.stats(mydata_preditors$hive_weight)$out  # outlier values.
+outlier_values <- boxplot.stats(mydata_preditors$hive_temperature)$out  # outlier values.
+outlier_values <- boxplot.stats(mydata_preditors$hive_humidity)$out  # outlier values.
+outlier_values <- boxplot.stats(mydata_preditors$ambient_temperature)$out  # outlier values.
+outlier_values <- boxplot.stats(mydata_preditors$ambient_humidity)$out  # outlier values.
+
+
+#Todos os outliers do dataset
 outliers <- boxplot(mydata_preditors, plot=FALSE)$out
-#Descobre em quais colunas estão os outliers
-mydata_preditors[which(mydata_preditors %in% outliers),]
-#Remove as colunas que tem outliers(Não recomendado p datasets pequenos)
-mydata_preditors <- mydata_preditors[-which(mydata_preditors %in% outliers),]
-#OU
 
+#Removendo os outliers que estão fora da faixa de 75th and 25th quartile
+x =  mydata_preditors$hive_weight
+qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
+caps <- quantile(x, probs=c(.05, .95), na.rm = T)
+H <- 1.5 * IQR(x, na.rm = T)
+x[x < (qnt[1] - H)] <- caps[1]
+x[x > (qnt[2] + H)] <- caps[2]
+#Dados sem os outliers 
+x
+#Com uma distribuição muito mais homogenea
+quantile(x)
 
-#Retira os outliers
+#Retira os outliers da plotagem dos bloxpot com (outline = FALSE)
 boxplot(mydata_preditors,horizontal=TRUE,axes=FALSE,outline=FALSE)
-identify(rep(1, length(mydata_preditors)), mydata_preditors, labels = seq_along(mydata_preditors))
-
 
 #Usando z-escore
-install.packages('outliers')
 library('outliers')
+
+#Pega a amostra mais extrema de cada coluna
 outlier(mydata_preditors)
+#Pega  a mais extrema do lado oposto
+outlier(mydata_preditors,opposite=TRUE)
+
 # Calculando Z score
 z <- scores(mydata_preditors)
+z
+#Quantidade de dados que possuem um z-score maior que 3
+length(z[z > 3])
+#Os outliers com -3<x<3
+mydata_preditors[z > 3.0] 
+outliers_up = mydata_preditors[z > 3.0] 
 # Mostra o numero de outliers extremos usando o Z-escore
-length(z[z > 9.9])
-scores(mydata_preditors, type="z", prob=0.95)  # beyond 95th %ile based on z-scores
+length(scores(mydata_preditors, type="z", prob=0.95))  # beyond 95th %ile based on z-scores
 
 # Removendo outliers extremos
-no_outliers <- mydata_preditors[-which(z > 9.9)]
+no_outliers <- mydata_preditors[-which(z > 3.0 )]
+
+
+
 
 
 #***************************Transformações para resolver outliers***************************
 #Imputação
-install.packages('Hmisc')
 library('Hmisc')
-impute(mydata_preditors$ptratio, mean)  # replace with mean
-impute(mydata_preditors$ptratio, median)  # median
-impute(mydata_preditors$ptratio, 20)  # replace specific number
+
+#Trocando os outliers por missing values
+mydata_preditors[z > 3.0] <- NA
+is.na(mydata_preditors)
+
+
+
+#Descorbir se tem  algum valor faltando (missing values), 
+#se não tiver não aplica a imputação
+anyNA(mydata_preditors) 
+
+#Contagem de quantos valores estão em falta em cada preditor
+sapply(mydata_preditors
+       , function(x) sum(is.na(x)))
+
+#Se tiver aplica a imputação das seguintes formas
+
+#Escolhendo a coluna que irá sofrer a imputação
+x =  mydata_preditors$hive_weight
+anyNA(x) 
+
+#Média
+y = impute(x, mean)  
+anyNA(y) 
+#mediana
+impute(x, median)  
+#subsistituir por um numero especifico (ex: 20)
+impute(x, 20) 
 #Imputação com KNN
+library('DMwR')
 knnOutput <- knnImputation(mydata_preditors[, !names(mydata_preditors) %in% "medv"])  # perform knn imputation.
 anyNA(knnOutput)
 
 
-#Ver a performance da imputação
-install.packages('DMwR')
-library('DMwR')
-actuals <- mydata_preditors$ptratio[is.na(mydata_preditors$ptratio)]
-predicteds <- rep(mean(mydata_preditors$ptratio, na.rm=T), length(actuals))
-regr.eval(actuals, predicteds)
-
 #Utilizando o spatial sign 
 #primeiro necessario normalizar
-install.packages('caret')
 library('caret')
 myTrans <- preProcess(mydata_preditors, method=c("center", "scale"))
 myTrans <- as.numeric(myTrans)
-myTransformed <- spatialSign(mydata_preditors)
-myTransformed <- as.data.frame(myTransformed)
+myTransformed <- spatialSign(mydata_preditors, na.rm = TRUE)
+myTransformed <- as.data.frame(myTransformed, drop = FALSE)
 
 
-p1 <- xyplot(  data = mydata_preditors, main="Original")
-p2 <- xyplot(myTransformed, data = myTransformed, main="After Spatial Sign")
-grid.arrange(p1, p2, ncol = 2)
+trellis.par.set(caretTheme())
+featurePlot(mydata_preditors[,-5], mydata_preditors[,5], "pairs")
+featurePlot(spatialSign(scale(mydata_preditors[,-5])), mydata_preditors[,5], "pairs")
+
 
 
 
@@ -146,28 +221,29 @@ sapply(mydata_preditors
 #Descartar os dados
 newdata <- na.omit(mydata_preditors) 
 
-install.packages("mice")
 library('mice')
+#Para entender o padrão dos dados faltantes Ex:os valores da 1 coluna 
+#indicam a quantidade de valores faltantes (quando uma coluna esta indicado com um zero -- ele é a coluna que os valores faltantes de referencia)
+#informa a quantidade de valores que estão completos Ex:36013
+md.pattern(mydata_preditors)
+install.packages("VIM")
+library(VIM)
+#Entender os padrões de dados faltantes
+aggr_plot <- aggr(mydata_preditors, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(mydata_preditors), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
 
 #Preencher com novos valores
 #Imputando valores (pode usar os mesmos do outliers) 
 #Usando predictive mean matching
-#https://datascienceplus.com/imputing-missing-data-with-r-mice-package/
 tempData <- mice(mydata_preditors,m=5,maxit=50,meth='pmm',seed=500)
+#o data set completo imputado
 miceOutput <- complete(tempData)
 anyNA(miceOutput)
 
-#Lets compute the accuracy of ptratio.
-
-actuals <- is.na(mydata_preditors$ptratio)
-predicteds <- miceOutput[is.na(mydata_preditors$ptratio), "ptratio"]
-regr.eval(actuals, predicteds)
-
-
-# package para utilizar a funcao skewness
 
 #***************************Calculo da Obliquidade dos preditores*************************** 
-install.packages("moments")
+
+# package para utilizar a funcao skewness
 library(moments)
 
 skewness(mydata$ambient_temperature  , na.rm = TRUE)
@@ -183,14 +259,14 @@ skewness(mydata$hive_weight  , na.rm = TRUE)
 
 library(MASS)
 
+#Modelo linear
 full.model <- lm(hive_temperature ~., data = mydata_preditors)
+#Valores sem obliquidade
 bc = boxcox(full.model, lambda = seq(-3, 3), plotit = TRUE)
-#Pega o lambda ideal
+#Lambda ideal escolhido pela função box cox 
 (lambda <- bc$x[which.max(bc$y)])
 
-
 #***************************Scatter plot***************************
-install.packages("corrplot")
 library(corrplot)
 attach(mtcars)
 pairs(mydata_preditors,panel = panel.smooth, col = mydata$Month,pch=16)
@@ -232,15 +308,11 @@ anova(full.model) # anova table
 #***********************Reduzindo o número de preditores *******************************************
 
 #PCA
-install.packages("factoextra")
+
 library(factoextra)
-install.packages("ggplot2")
-install.packages("ggfortify")
 library(ggfortify)
 library(ggplot2)
 attach(mtcars)
-
-install.packages("mlbench")
 library(mlbench)
 
 pcaObject <- prcomp(na.omit(mydata_preditors[,-c(1,11)]),center = TRUE, scale. = TRUE)
